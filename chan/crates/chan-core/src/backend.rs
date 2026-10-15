@@ -34,6 +34,16 @@ pub trait Channel {
         limit: usize,
     ) -> Result<(Vec<Message>, Cursor)>;
 
+    /// Read up to `limit` messages from `room`'s log for `who`, starting at `cursor`.
+    /// Fan-out is exactly-once per subscriber because `cursor` is caller-held.
+    fn recv_room(
+        &self,
+        who: &ParticipantId,
+        room: &RoomId,
+        cursor: Cursor,
+        limit: usize,
+    ) -> Result<(Vec<Message>, Cursor)>;
+
     /// Ensure `who` is subscribed to `room`; returns their current cursor.
     fn subscribe(&self, who: &ParticipantId, room: &RoomId) -> Result<Cursor>;
 

@@ -122,21 +122,6 @@ impl FileBackend {
         Ok((out, end))
     }
 
-    /// Read a room log from `cursor` (fan-out is one message per subscriber).
-    pub fn recv_room(
-        &self,
-        _who: &ParticipantId,
-        room: &RoomId,
-        cursor: Cursor,
-        limit: usize,
-    ) -> Result<(Vec<Message>, Cursor)> {
-        self.read_messages(
-            &self.root.join("rooms").join(format!("{room}.jsonl")),
-            cursor,
-            limit,
-        )
-    }
-
     /// Read `who`'s direct inbox from `cursor`.
     pub fn recv_direct(
         &self,
@@ -167,6 +152,20 @@ impl Channel for FileBackend {
         limit: usize,
     ) -> Result<(Vec<Message>, Cursor)> {
         self.recv_direct(who, cursor, limit)
+    }
+
+    fn recv_room(
+        &self,
+        _who: &ParticipantId,
+        room: &RoomId,
+        cursor: Cursor,
+        limit: usize,
+    ) -> Result<(Vec<Message>, Cursor)> {
+        self.read_messages(
+            &self.root.join("rooms").join(format!("{room}.jsonl")),
+            cursor,
+            limit,
+        )
     }
 
     fn subscribe(&self, who: &ParticipantId, room: &RoomId) -> Result<Cursor> {
