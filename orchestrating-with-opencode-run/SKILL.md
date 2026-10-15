@@ -101,9 +101,10 @@ exit capture in a subshell, or you'll record the *backgrounding* status, not the
 
 ## 3. Message Passing — How You and the Child Talk
 
-There is **no live channel**. `opencode run` is fire-and-forget: every message travels
-through **files, logs, and exit codes**, and both sides start with zero shared memory.
-Design the contract in the brief instead of improvising it.
+A plain `opencode run` is fire-and-forget: with no channel, every message travels through
+**files, logs, and exit codes**, and both sides start with zero shared memory. Design the
+contract in the brief instead of improvising it. (With a `chan` channel — or a live
+`opencode serve` session — this changes; see "Prefer a real channel" and "Live control".)
 
 **Down (you → child) — the input**
 - **Primary:** the `--file <brief>` itself — the whole task, self-contained.
@@ -116,8 +117,9 @@ Design the contract in the brief instead of improvising it.
     "Resume <name>. It is partially done — see the attached diff. Finish ONLY the
      remaining work, run the gate, do NOT commit." >/tmp/opencode/<name>.log 2>&1
   ```
-- **Mid-flight steering is impossible.** To change direction, kill the run (`pkill`
-  scoped to *your* process/port) and dispatch a fresh brief.
+- **Mid-flight steering of `opencode run` is impossible.** To change direction, kill the
+  run (`pkill` scoped to *your* process/port) and dispatch a fresh brief. For a *live*
+  session, steer with chan instead — see "Live control".
 - **Fan-out:** send the same brief to several models at once (different output files)
   to compare.
 
@@ -177,17 +179,25 @@ The orchestrator dispatches tasks and `chan_await`s the results. Because deliver
 durable-first, a rate-limited or slow child never loses a message. Runnable end-to-end
 examples (CLI and MCP variants) are in `demos/chan-collaboration/`.
 
-**Live control — steering a child that is still running.** Beyond the durable
-hand-back, `chan` can reach *into* a live `opencode serve` session:
+**Live control — steer a session that is still running.** `chan` can reach *into* a live
+`opencode serve` session, so you can send more data and re-control after it finishes:
 
-- `chan attach --participant <child> --session ses_…` — bridge the child's inbox into its
-  running session (durable-first; `--once` to drain, default follows). This is how you
-  **send more data** to a child without restarting it.
-- `chan interrupt --session ses_…` — stop the session's active execution (the MCP tools
-  are `chan_inject` / `chan_interrupt` / `chan_active`).
+- `chan attach --participant <child> --session ses_…` — bridge a child's inbox into its
+  running session (durable-first; `--once` to drain, default follows).
+- `chan interrupt --session ses_…` — stop its active execution.
+- MCP tools: `chan_inject` / `chan_interrupt` / `chan_active`.
 
-This goes through the `chan-live` port, so the engine (opencode today) is swappable —
-see `chan/README.md` and `docs/plans/2026-10-16-chan-live-layer-design.md`.
+Two setup gotchas, both of which bite hard:
+- **Pin the model.** A session with no model uses the account default, which may be dead
+  (e.g. an OpenRouter key with no credits → every turn fails `provider.quota`). Pin it in
+  the server config or via `POST /api/session/{id}/model`.
+- **A session's own `opencode.json` is not loaded** for API-created sessions, so a
+  per-agent chan MCP never registers. Put the chan MCP in the *server* config
+  (`OPENCODE_CONFIG_CONTENT`) — all sessions then share one identity.
+
+Runnable end-to-end: `demos/chan-collaboration/live-control.sh`. The port/adapter design
+(the engine — opencode today — is swappable): `chan/README.md` and
+`docs/plans/2026-10-16-chan-live-layer-design.md`.
 
 ## 4. Verify — Never Trust the Child
 
@@ -248,7 +258,7 @@ trustworthy, the split points are your decisions. On rate-limit, switch provider
 | Broad `pkill -f opencode run` | Kill only your own run/port |
 | No reference impl in the brief | Point at a sibling implementation to mirror |
 | One-off success declared green | Repeat parallel runs; check residue = 0 |
-| Expecting a live back-and-forth with the child | No channel — brief goes down, files/log go up |
+| Expecting a live back-and-forth with `opencode run` | It's fire-and-forget; use a `chan` channel or a live `opencode serve` session |
 | Parsing only the child's stdout | Have it **write** a result/report file; read that + the log |
 | Restarting a failed run from scratch | Attach `git diff` and re-dispatch a **RESUME** brief |
 
