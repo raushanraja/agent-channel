@@ -26,6 +26,9 @@ pub enum ChanError {
     /// The caller violated the channel protocol.
     #[error("protocol: {0}")]
     Protocol(String),
+    /// A network transport to a remote channel failed.
+    #[error("transport: {0}")]
+    Transport(String),
 }
 
 /// Convenience alias for `Result<T, ChanError>`.

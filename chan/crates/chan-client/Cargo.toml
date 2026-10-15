@@ -17,5 +17,6 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 chan-server = { path = "../chan-server" }
+axum = { workspace = true }
 tokio = { workspace = true }
 tempfile = { workspace = true }

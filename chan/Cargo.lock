@@ -284,6 +284,7 @@ dependencies = [
 name = "chan-client"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "chan-core",
  "chan-server",
  "reqwest",
