@@ -33,4 +33,3 @@ unsafe_code = "warn"
 
 [workspace.lints.clippy]
 all = "warn"
-pedantic = "warn"
