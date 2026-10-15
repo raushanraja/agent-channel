@@ -149,6 +149,13 @@ A `PROBE_OK` probe doubles as a liveness + rate-limit check before (re)dispatch.
 no memory of your conversation; you have no memory of its reasoning unless it wrote it
 down. If it isn't in the brief, the diff, a file, or the log — it didn't happen.
 
+**Prefer a real channel when you have one.** This repo ships `chan` (`chan/`): a durable,
+typed channel with direct + pub/sub addressing over a file log, a live `opencode` attach,
+and an MCP server. Instead of files/logs-by-hand, use `chan send` / `chan await` / `chan
+pump` for the down/up traffic, and give each child **direct attach** by pointing its MCP
+config at `chan-mcp --as <participant>` (native `chan_send` / `chan_await` tools, no CLI
+shelling). Durable-first means a rate-limited child never loses a message.
+
 ## 4. Verify — Never Trust the Child
 
 - **Re-run the gate yourself.** The child's "all green" is a claim.
