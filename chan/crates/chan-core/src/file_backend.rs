@@ -15,6 +15,10 @@ use crate::message::{Message, MessageId};
 use fs4::FileExt;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Process-local counter for unique temp filenames.
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// A filesystem-backed channel.
 pub struct FileBackend {
@@ -59,10 +63,27 @@ impl FileBackend {
 
     fn write_state(&self, name: &str, value: &serde_json::Value) -> Result<()> {
         let path = self.state_path(name);
-        let tmp = path.with_extension("tmp");
+        // Unique temp name: concurrent writers must never `rename` the same temp away.
+        let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        let tmp = self.state_path(&format!(".{name}.{}.{}.tmp", std::process::id(), seq));
         std::fs::write(&tmp, serde_json::to_vec_pretty(value)?)?;
         std::fs::rename(&tmp, &path)?;
         Ok(())
+    }
+
+    /// Run `f` under an exclusive lock on the state directory, so a concurrent
+    /// read-modify-write of a shared state file cannot lose an update.
+    fn with_state_lock<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
+        let lock_path = self.root.join("state").join(".lock");
+        let fh = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock_path)?;
+        FileExt::lock(&fh).map_err(|e| crate::ChanError::Lock(e.to_string()))?;
+        let out = f();
+        let _ = FileExt::unlock(&fh);
+        out
     }
 
     /// Current cursor for `scope` (0 if unseen).
@@ -75,12 +96,14 @@ impl FileBackend {
 
     /// Persist a cursor for `scope`.
     pub fn set_cursor(&self, scope: &str, c: Cursor) -> Result<()> {
-        let mut v = self.read_state("cursors.json")?;
-        if !v.is_object() {
-            v = serde_json::json!({});
-        }
-        v[scope] = serde_json::json!(c);
-        self.write_state("cursors.json", &v)
+        self.with_state_lock(|| {
+            let mut v = self.read_state("cursors.json")?;
+            if !v.is_object() {
+                v = serde_json::json!({});
+            }
+            v[scope] = serde_json::json!(c);
+            self.write_state("cursors.json", &v)
+        })
     }
 
     /// Whether `who` has acknowledged `id`.
@@ -176,21 +199,23 @@ impl Channel for FileBackend {
     }
 
     fn ack(&self, who: &ParticipantId, id: &MessageId) -> Result<()> {
-        let mut v = self.read_state("acks.json")?;
-        if !v.is_object() {
-            v = serde_json::json!({});
-        }
-        let sid = id.to_string();
-        let mut arr: Vec<serde_json::Value> = v
-            .get(who.as_str())
-            .and_then(serde_json::Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        if !arr.iter().any(|x| x.as_str() == Some(sid.as_str())) {
-            arr.push(serde_json::json!(sid));
-        }
-        v[who.as_str()] = serde_json::Value::Array(arr);
-        self.write_state("acks.json", &v)
+        self.with_state_lock(|| {
+            let mut v = self.read_state("acks.json")?;
+            if !v.is_object() {
+                v = serde_json::json!({});
+            }
+            let sid = id.to_string();
+            let mut arr: Vec<serde_json::Value> = v
+                .get(who.as_str())
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            if !arr.iter().any(|x| x.as_str() == Some(sid.as_str())) {
+                arr.push(serde_json::json!(sid));
+            }
+            v[who.as_str()] = serde_json::Value::Array(arr);
+            self.write_state("acks.json", &v)
+        })
     }
 
     fn list(&self) -> Result<ChannelStats> {
@@ -318,6 +343,32 @@ mod tests {
         b.send(&m).unwrap();
         let (msgs, _) = b.recv(&p, 0, 10).unwrap();
         assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn concurrent_state_writes_do_not_race_or_lose_updates() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        let mut hs = Vec::new();
+        for w in 0..8 {
+            let path = path.clone();
+            hs.push(std::thread::spawn(move || {
+                let b = FileBackend::init(&path).unwrap();
+                for i in 0..20 {
+                    b.set_cursor(&format!("scope:w{w}:{i}"), i).unwrap();
+                }
+            }));
+        }
+        for h in hs {
+            h.join().unwrap();
+        }
+        let b = FileBackend::init(&path).unwrap();
+        let v = b.read_state("cursors.json").unwrap();
+        assert_eq!(
+            v.as_object().unwrap().len(),
+            160,
+            "every concurrent cursor update must be retained"
+        );
     }
 
     #[test]
