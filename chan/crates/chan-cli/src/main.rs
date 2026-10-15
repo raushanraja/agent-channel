@@ -10,7 +10,7 @@ use chan_core::{
     ParticipantId, RoomId,
 };
 use chan_live::{Backend, SessionRef};
-use chan_opencode::OpencodeClient;
+use chan_opencode::connect;
 use clap::{Parser, Subcommand};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -133,9 +133,10 @@ enum Cmd {
         #[arg(long)]
         session: String,
         /// Root URL of the opencode server (the API is mounted at /api).
-        #[arg(long, env = "CHAN_OPENCODE", default_value = "http://127.0.0.1:4096")]
-        opencode: String,
-        /// Server password (printed by `opencode serve`).
+        /// Omit to auto-discover a running background service.
+        #[arg(long, env = "CHAN_OPENCODE")]
+        opencode: Option<String>,
+        /// Server password (`OPENCODE_PASSWORD`). Auto-discovered when omitted.
         #[arg(long, env = "OPENCODE_PASSWORD")]
         opencode_password: Option<String>,
         /// Drain the inbox once and exit instead of following.
@@ -150,9 +151,10 @@ enum Cmd {
         #[arg(long)]
         session: String,
         /// Root URL of the opencode server (the API is mounted at /api).
-        #[arg(long, env = "CHAN_OPENCODE", default_value = "http://127.0.0.1:4096")]
-        opencode: String,
-        /// Server password (printed by `opencode serve`).
+        /// Omit to auto-discover a running background service.
+        #[arg(long, env = "CHAN_OPENCODE")]
+        opencode: Option<String>,
+        /// Server password (`OPENCODE_PASSWORD`). Auto-discovered when omitted.
         #[arg(long, env = "OPENCODE_PASSWORD")]
         opencode_password: Option<String>,
     },
@@ -436,7 +438,7 @@ fn main() -> Result<()> {
             once,
             poll_ms,
         } => {
-            let live = OpencodeClient::with_password(opencode, opencode_password);
+            let live = connect(opencode, opencode_password);
             let who = ParticipantId::new(participant);
             let session = SessionRef::new(session);
             let scope = format!("inbox:{who}");
@@ -464,7 +466,7 @@ fn main() -> Result<()> {
             opencode,
             opencode_password,
         } => {
-            let live = OpencodeClient::with_password(opencode, opencode_password);
+            let live = connect(opencode, opencode_password);
             let rt = tokio::runtime::Runtime::new()?;
             let interrupted = rt.block_on(live.interrupt(&SessionRef::new(session)))?;
             print_json(&serde_json::json!({ "interrupted": interrupted }));

@@ -35,6 +35,17 @@ with the fixed username `opencode` and the password printed by `opencode serve`
 `session.interrupt`, `session.inbox`, `session.form`) **do** exist on the real server —
 the stale SDK is what misled the original implementation.
 
+### Zero-config discovery
+
+The proxy/serve path has no "auth off" switch — `opencode serve` always computes a password
+(from `OPENCODE_SERVER_PASSWORD`, the service config, or a random default). So instead of
+bypassing auth, `chan` **auto-discovers** it: a background service (`serve --service`)
+registers `{url, password, pid}` in `$XDG_STATE_HOME/opencode/service.json` (default
+`~/.local/state/opencode/service.json`). `chan_opencode::connect(None, None)` reads that
+file (rewriting `0.0.0.0`/`::` binds to loopback) and dials it with the password, so call
+sites need no configuration when the service is running. Precedence: explicit base/password
+→ discovered service → `http://127.0.0.1:4096`.
+
 ## Decision — port & adapter (hexagonal)
 
 - **`chan-live`** = the *port*: a product-agnostic `Backend` trait

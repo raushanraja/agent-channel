@@ -7,7 +7,7 @@ use chan_core::{
     Address, Channel, FileBackend, Message, MessageId, MessageKind, ParticipantId, RoomId,
 };
 use chan_live::{Backend, SessionRef};
-use chan_opencode::OpencodeClient;
+use chan_opencode::{OpencodeClient, connect};
 use clap::Parser;
 use rmcp::ErrorData as McpError;
 use rmcp::handler::server::router::tool::ToolRouter;
@@ -28,9 +28,10 @@ struct Cli {
     #[arg(long = "as", env = "CHAN_PARTICIPANT", default_value = "orchestrator")]
     as_: String,
     /// Root URL of the opencode server used by the live tools (API at /api).
-    #[arg(long, env = "CHAN_OPENCODE", default_value = "http://127.0.0.1:4096")]
-    opencode: String,
-    /// Server password printed by `opencode serve`.
+    /// Omit to auto-discover a running background service.
+    #[arg(long, env = "CHAN_OPENCODE")]
+    opencode: Option<String>,
+    /// Server password (`OPENCODE_PASSWORD`). Auto-discovered when omitted.
     #[arg(long, env = "OPENCODE_PASSWORD")]
     opencode_password: Option<String>,
 }
@@ -129,7 +130,7 @@ struct ActiveArgs {
 struct ChanServer {
     dir: PathBuf,
     identity: ParticipantId,
-    opencode: String,
+    opencode: Option<String>,
     opencode_password: Option<String>,
     tool_router: ToolRouter<Self>,
 }
@@ -176,7 +177,7 @@ impl ChanServer {
     fn new(
         dir: PathBuf,
         identity: ParticipantId,
-        opencode: String,
+        opencode: Option<String>,
         opencode_password: Option<String>,
     ) -> Self {
         Self {
@@ -193,8 +194,8 @@ impl ChanServer {
     }
 
     fn live_client(&self, opencode: &Option<String>) -> OpencodeClient {
-        let base = opencode.clone().unwrap_or_else(|| self.opencode.clone());
-        OpencodeClient::with_password(base, self.opencode_password.clone())
+        let base = opencode.clone().or_else(|| self.opencode.clone());
+        connect(base, self.opencode_password.clone())
     }
 
     fn participant(&self, p: &Option<String>) -> ParticipantId {

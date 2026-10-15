@@ -8,6 +8,8 @@
 pub mod adapter;
 pub mod attach;
 pub mod client;
+pub mod discovery;
 
 pub use attach::AttachBackend;
 pub use client::{EventStream, OpencodeClient};
+pub use discovery::{connect, discover_from, discover_local, service_state_path};
