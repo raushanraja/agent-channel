@@ -14,7 +14,10 @@ path = "src/main.rs"
 
 [dependencies]
 chan-core = { path = "../chan-core" }
+chan-client = { path = "../chan-client" }
 chan-opencode = { path = "../chan-opencode" }
+chan-server = { path = "../chan-server" }
+uuid = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
@@ -25,3 +28,5 @@ tokio = { workspace = true }
 [dev-dependencies]
 assert_cmd = { workspace = true }
 tempfile = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }

@@ -270,14 +270,18 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "axum",
+ "chan-client",
  "chan-core",
  "chan-opencode",
+ "chan-server",
  "clap",
  "serde_json",
  "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

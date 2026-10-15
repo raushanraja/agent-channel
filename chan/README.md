@@ -57,6 +57,43 @@ Tools: `chan_send`, `chan_publish`, `chan_recv`, `chan_await`, `chan_room`,
 `chan_subscribe`, `chan_ack`, `chan_inbox`. Identity defaults to `--as` /
 `CHAN_PARTICIPANT`.
 
+## Server (multi-host)
+
+Run the daemon once and let participants on any host talk to it over HTTP + SSE:
+
+```bash
+chan token                     # mint a bearer token (or use --token / CHAN_TOKEN)
+chan serve --bind 0.0.0.0:27400 --dir .chan --token <token>
+```
+
+Clients point at it with `--server` (and `--token`); without `--server` the CLI uses the
+local file log as before:
+
+```bash
+chan --server http://host:27400 --token <token> send --from orch --to direct:w1 --kind task --payload '{"x":1}'
+chan --server http://host:27400 --token <token> await --as w1 --kind task --timeout 30s
+```
+
+`RemoteBackend` (crate `chan-client`) implements the same `Channel` trait over the
+network, so the CLI and tools are backend-agnostic. The daemon owns the file log —
+it stays the single source of truth.
+
+### HTTP API (v1)
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/v1/health` | open; `{status, participants, rooms}` |
+| POST | `/v1/send` | `{message}` → `{id}` |
+| GET | `/v1/inbox/{participant}` | `?cursor=&limit=` → `{messages, cursor}` |
+| GET | `/v1/room/{room}` | `?participant=&cursor=&limit=` |
+| POST | `/v1/subscribe` | `{participant, room}` |
+| POST | `/v1/ack` | `{participant, id}` |
+| GET | `/v1/rooms` | `{rooms:[...]}` |
+| GET | `/v1/inbox/{participant}/stream` | SSE of `message` events |
+
+Auth: `Authorization: Bearer <token>` (or `?token=`). Health is always open. Tokens are a
+single shared secret for now; TLS/ACLs/rotation are future work.
+
 ## Layout on disk
 
 ```
