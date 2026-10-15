@@ -149,12 +149,33 @@ A `PROBE_OK` probe doubles as a liveness + rate-limit check before (re)dispatch.
 no memory of your conversation; you have no memory of its reasoning unless it wrote it
 down. If it isn't in the brief, the diff, a file, or the log — it didn't happen.
 
-**Prefer a real channel when you have one.** This repo ships `chan` (`chan/`): a durable,
-typed channel with direct + pub/sub addressing over a file log, a live `opencode` attach,
-and an MCP server. Instead of files/logs-by-hand, use `chan send` / `chan await` / `chan
-pump` for the down/up traffic, and give each child **direct attach** by pointing its MCP
-config at `chan-mcp --as <participant>` (native `chan_send` / `chan_await` tools, no CLI
-shelling). Durable-first means a rate-limited child never loses a message.
+**Prefer a real channel when you have one — `chan`.** This repo ships `chan` (see
+`chan/`): a durable, typed channel with direct + pub/sub addressing over a file log, a
+live `opencode` attach, a network daemon, and an MCP server. Use it instead of
+hand-rolling files/logs, so down/up traffic is typed, durable, and observable.
+
+Attach a child to the channel two ways:
+
+- **MCP — native tools (preferred).** Put this in the child's project `opencode.json` and
+  launch the child with that project as its cwd; it then has `chan_send` / `chan_await` /
+  `chan_publish` / `chan_subscribe` as tools (no shelling):
+  ```json
+  { "mcp": { "chan": { "type": "local",
+    "command": ["chan-mcp", "--as", "<child>"], "enabled": true } } }
+  ```
+- **CLI.** Give the child the daemon flags for its shell: `chan --server <url> --token <t>`.
+
+**Instruct the child, in its brief, to pass messages** — this is the "down" the brief
+carries, and it's what turns the child from a black box into a collaborator:
+
+> You are agent `<name>` on a channel. In order: `chan_subscribe` room `team`;
+> `chan_publish` room `team` payload `{join}`; `chan_await` kind `task` (it blocks — wait
+> for it); do the work; `chan_send` to `direct:orch` kind `result` payload `{…}`;
+> `chan_publish` room `team` payload `{done}`. Then report the result JSON.
+
+The orchestrator dispatches tasks and `chan_await`s the results. Because delivery is
+durable-first, a rate-limited or slow child never loses a message. Runnable end-to-end
+examples (CLI and MCP variants) are in `demos/chan-collaboration/`.
 
 ## 4. Verify — Never Trust the Child
 
