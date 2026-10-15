@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 chan-core = { path = "../chan-core" }
+chan-live = { path = "../chan-live" }
 chan-client = { path = "../chan-client" }
 chan-opencode = { path = "../chan-opencode" }
 chan-server = { path = "../chan-server" }

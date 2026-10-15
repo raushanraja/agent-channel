@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 chan-core = { path = "../chan-core" }
+chan-live = { path = "../chan-live" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

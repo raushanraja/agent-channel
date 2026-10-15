@@ -9,6 +9,8 @@ use chan_core::{
     Address, Channel, ChannelStats, Cursor, FileBackend, Message, MessageId, MessageKind,
     ParticipantId, RoomId,
 };
+use chan_live::{Backend, SessionRef};
+use chan_opencode::OpencodeClient;
 use clap::{Parser, Subcommand};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -124,12 +126,29 @@ enum Cmd {
     Rooms,
     /// Summary counts.
     List,
-    /// Attach a participant to an opencode session (live; not built yet).
+    /// Bridge a participant's inbox into a live opencode session (durable-first).
     Attach {
         #[arg(long)]
         participant: String,
         #[arg(long)]
         session: String,
+        /// Base URL of the opencode server.
+        #[arg(long, env = "CHAN_OPENCODE", default_value = "http://127.0.0.1:4096")]
+        opencode: String,
+        /// Drain the inbox once and exit instead of following.
+        #[arg(long)]
+        once: bool,
+        /// Poll interval while following.
+        #[arg(long, default_value_t = 250)]
+        poll_ms: u64,
+    },
+    /// Interrupt a live opencode session's active execution.
+    Interrupt {
+        #[arg(long)]
+        session: String,
+        /// Base URL of the opencode server.
+        #[arg(long, env = "CHAN_OPENCODE", default_value = "http://127.0.0.1:4096")]
+        opencode: String,
     },
     /// Stream messages from your inbox.
     Pump {
@@ -406,11 +425,38 @@ fn main() -> Result<()> {
         Cmd::Attach {
             participant,
             session,
+            opencode,
+            once,
+            poll_ms,
         } => {
-            eprintln!(
-                "chan: live attach for {participant} -> {session} is not built yet. \
-                 Durable messaging is unaffected."
-            );
+            let live = OpencodeClient::new(opencode);
+            let who = ParticipantId::new(participant);
+            let session = SessionRef::new(session);
+            let scope = format!("inbox:{who}");
+            let rt = tokio::runtime::Runtime::new()?;
+            let mut cursor = chan.cursor(&scope)?;
+            loop {
+                let (msgs, next) = chan.recv_direct(&who, cursor, 1000)?;
+                for m in &msgs {
+                    let text = serde_json::to_string(m)?;
+                    match rt.block_on(live.inject(&session, &text)) {
+                        Ok(()) => eprintln!("chan: injected {} -> {session}", m.id),
+                        Err(e) => eprintln!("chan: inject failed for {}: {e}", m.id),
+                    }
+                }
+                cursor = next;
+                chan.set_cursor(&scope, cursor)?;
+                if once {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(poll_ms));
+            }
+        }
+        Cmd::Interrupt { session, opencode } => {
+            let live = OpencodeClient::new(opencode);
+            let rt = tokio::runtime::Runtime::new()?;
+            let interrupted = rt.block_on(live.interrupt(&SessionRef::new(session)))?;
+            print_json(&serde_json::json!({ "interrupted": interrupted }));
         }
         Cmd::Pump { as_, follow } => {
             let who = ParticipantId::new(as_);

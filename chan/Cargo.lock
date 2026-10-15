@@ -273,6 +273,7 @@ dependencies = [
  "axum",
  "chan-client",
  "chan-core",
+ "chan-live",
  "chan-opencode",
  "chan-server",
  "clap",
@@ -313,11 +314,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "chan-live"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "chan-mcp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "chan-core",
+ "chan-live",
  "chan-opencode",
  "clap",
  "rmcp",
@@ -335,6 +345,7 @@ name = "chan-opencode"
 version = "0.1.0"
 dependencies = [
  "chan-core",
+ "chan-live",
  "chrono",
  "eventsource-stream",
  "futures",

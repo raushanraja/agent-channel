@@ -85,7 +85,15 @@ fn initialize_list_and_call_send() {
         &serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} }),
     );
     let tools = recv_until(&rx, "\"id\":2");
-    for name in ["chan_send", "chan_recv", "chan_await", "chan_publish"] {
+    for name in [
+        "chan_send",
+        "chan_recv",
+        "chan_await",
+        "chan_publish",
+        "chan_inject",
+        "chan_interrupt",
+        "chan_active",
+    ] {
         assert!(tools.contains(name), "missing tool {name} in {tools}");
     }
 

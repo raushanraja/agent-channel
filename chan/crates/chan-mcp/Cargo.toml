@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 chan-core = { path = "../chan-core" }
+chan-live = { path = "../chan-live" }
 chan-opencode = { path = "../chan-opencode" }
 rmcp = { workspace = true }
 schemars = { workspace = true }

@@ -127,3 +127,72 @@ fn await_returns_matching_message() {
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["kind"], "question");
 }
+
+#[test]
+fn attach_once_degrades_without_a_live_server() {
+    let tmp = tempfile::tempdir().unwrap();
+    assert!(run(tmp.path(), &["init"]).status.success());
+    assert!(
+        run(
+            tmp.path(),
+            &[
+                "send",
+                "--from",
+                "orch",
+                "--to",
+                "direct:w1",
+                "--kind",
+                "task",
+                "--payload",
+                r#"{"x":1}"#,
+            ],
+        )
+        .status
+        .success()
+    );
+
+    // No opencode server on :1 — the bridge must still drain durably and exit 0.
+    let out = run(
+        tmp.path(),
+        &[
+            "attach",
+            "--participant",
+            "w1",
+            "--session",
+            "ses_x",
+            "--once",
+            "--opencode",
+            "http://127.0.0.1:1",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "attach failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // The inbox was consumed (cursor advanced) despite the live inject degrading.
+    let out = run(tmp.path(), &["inbox", "--as", "w1"]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["unread"], 0);
+}
+
+#[test]
+fn interrupt_without_a_live_server_fails_loudly() {
+    let tmp = tempfile::tempdir().unwrap();
+    assert!(run(tmp.path(), &["init"]).status.success());
+    let out = run(
+        tmp.path(),
+        &[
+            "interrupt",
+            "--session",
+            "ses_x",
+            "--opencode",
+            "http://127.0.0.1:1",
+        ],
+    );
+    assert!(
+        !out.status.success(),
+        "interrupt should fail when the engine is down"
+    );
+}

@@ -177,6 +177,18 @@ The orchestrator dispatches tasks and `chan_await`s the results. Because deliver
 durable-first, a rate-limited or slow child never loses a message. Runnable end-to-end
 examples (CLI and MCP variants) are in `demos/chan-collaboration/`.
 
+**Live control — steering a child that is still running.** Beyond the durable
+hand-back, `chan` can reach *into* a live `opencode serve` session:
+
+- `chan attach --participant <child> --session ses_…` — bridge the child's inbox into its
+  running session (durable-first; `--once` to drain, default follows). This is how you
+  **send more data** to a child without restarting it.
+- `chan interrupt --session ses_…` — stop the session's active execution (the MCP tools
+  are `chan_inject` / `chan_interrupt` / `chan_active`).
+
+This goes through the `chan-live` port, so the engine (opencode today) is swappable —
+see `chan/README.md` and `docs/plans/2026-10-16-chan-live-layer-design.md`.
+
 ## 4. Verify — Never Trust the Child
 
 - **Re-run the gate yourself.** The child's "all green" is a claim.

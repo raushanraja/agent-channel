@@ -14,11 +14,20 @@ direct MCP surface.
 | Crate | Role |
 |---|---|
 | `chan-core` | protocol + `FileBackend` (sync, dependency-light, source of truth) |
-| `chan-opencode` | live attach to `opencode serve` (async; degrades to `chan-core`) |
+| `chan-live` | the **live-session port** (product-agnostic `Backend` trait; engine-replaceable) |
+| `chan-opencode` | an **adapter**: implements `chan-live` over the opencode v2 HTTP API (async; degrades) |
 | `chan-mcp` | MCP server so agents attach with native tools |
 | `chan-cli` | the `chan` binary |
 
 `chan-core` depends on none of the others.
+
+### Live control (send more data / interrupt a running child)
+
+The live layer is a **port and adapter**: `chan-live` defines a stable `Backend` trait
+(`inject` / `interrupt` / `active`) over opaque sessions; `chan-opencode` implements it
+against opencode v2. Call sites hold a `dyn Backend`, so the engine can change (opencode
+v3, or another engine) without touching them. `LiveError::Unavailable` is the degrade
+signal — the message stays durable in `.chan/` and is delivered on the child's next read.
 
 ## CLI
 
@@ -33,7 +42,15 @@ chan subscribe --as orch --room build
 chan ack     --as w1 --id <message-id>
 chan inbox   --as w1                 # cursor + unread
 chan rooms | chan list
+chan attach  --participant w1 --session ses_…   # bridge w1's inbox into a live session
+chan interrupt --session ses_…                  # stop a running session
 ```
+
+`chan attach` is the **live bridge**: durable-first, it reads a participant's inbox and
+injects each message into a running opencode session (`--once` drains and exits; default
+follows). `--opencode <url>` selects the server (default `http://127.0.0.1:4096`).
+`chan interrupt` aborts a session's active execution. Both degrade: if the server is
+down, `attach` keeps the durable log intact; `interrupt` fails loudly.
 
 `--dir` / `CHAN_DIR` select the channel directory (default `.chan`). Output is JSON.
 Exit codes: `0` ok, `3` timeout/no-message, `2` usage, `1` error.
@@ -54,8 +71,10 @@ Point a session's MCP config at the binary and it gets channel tools natively:
 ```
 
 Tools: `chan_send`, `chan_publish`, `chan_recv`, `chan_await`, `chan_room`,
-`chan_subscribe`, `chan_ack`, `chan_inbox`. Identity defaults to `--as` /
-`CHAN_PARTICIPANT`.
+`chan_subscribe`, `chan_ack`, `chan_inbox`. Live control of running sessions:
+`chan_inject` (send more data into a live session), `chan_interrupt` (abort it), and
+`chan_active` (list live sessions). Identity defaults to `--as` / `CHAN_PARTICIPANT`; the
+live tools use `--opencode` / `CHAN_OPENCODE`.
 
 ## Server (multi-host)
 

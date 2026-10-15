@@ -1,11 +1,13 @@
 #![forbid(unsafe_code)]
-//! `chan-opencode` — live attach to a running `opencode serve` instance.
+//! `chan-opencode` — a **live-session adapter** for opencode (v2 HTTP API).
 //!
-//! Durable-first, live-second: messages are persisted to the `chan-core` file log
-//! before any network call, so a rate-limited or dead child never loses a message.
+//! This crate is deliberately thin: it implements [`chan_live::Backend`] for opencode and
+//! supplies a durable-first [`AttachBackend`]. Call sites depend on the `chan-live` *port*,
+//! never on this crate directly, so the engine is replaceable.
 
+pub mod adapter;
 pub mod attach;
 pub mod client;
 
 pub use attach::AttachBackend;
-pub use client::{AttachError, OpencodeClient};
+pub use client::{EventStream, OpencodeClient};

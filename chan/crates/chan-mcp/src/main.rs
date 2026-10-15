@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 use chan_core::{
     Address, Channel, FileBackend, Message, MessageId, MessageKind, ParticipantId, RoomId,
 };
+use chan_live::{Backend, SessionRef};
+use chan_opencode::OpencodeClient;
 use clap::Parser;
 use rmcp::ErrorData as McpError;
 use rmcp::handler::server::router::tool::ToolRouter;
@@ -25,6 +27,9 @@ struct Cli {
     /// This server's participant identity.
     #[arg(long = "as", env = "CHAN_PARTICIPANT", default_value = "orchestrator")]
     as_: String,
+    /// Base URL of the opencode server used by the live tools.
+    #[arg(long, env = "CHAN_OPENCODE", default_value = "http://127.0.0.1:4096")]
+    opencode: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -90,10 +95,38 @@ struct AckArgs {
     id: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SessionArgs {
+    /// Live session id.
+    session: String,
+    /// Override the opencode server base URL.
+    #[serde(default)]
+    opencode: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct InjectArgs {
+    /// Live session id.
+    session: String,
+    /// Text to deliver into the session.
+    text: String,
+    /// Override the opencode server base URL.
+    #[serde(default)]
+    opencode: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ActiveArgs {
+    /// Override the opencode server base URL.
+    #[serde(default)]
+    opencode: Option<String>,
+}
+
 #[derive(Clone)]
 struct ChanServer {
     dir: PathBuf,
     identity: ParticipantId,
+    opencode: String,
     tool_router: ToolRouter<Self>,
 }
 
@@ -136,16 +169,21 @@ fn parse_addr(s: &str) -> Result<Address, McpError> {
 
 #[tool_router]
 impl ChanServer {
-    fn new(dir: PathBuf, identity: ParticipantId) -> Self {
+    fn new(dir: PathBuf, identity: ParticipantId, opencode: String) -> Self {
         Self {
             dir,
             identity,
+            opencode,
             tool_router: Self::tool_router(),
         }
     }
 
     fn backend(&self) -> Result<FileBackend, McpError> {
         FileBackend::init(&self.dir).map_err(internal)
+    }
+
+    fn live_client(&self, opencode: &Option<String>) -> OpencodeClient {
+        OpencodeClient::new(opencode.clone().unwrap_or_else(|| self.opencode.clone()))
     }
 
     fn participant(&self, p: &Option<String>) -> ParticipantId {
@@ -276,6 +314,41 @@ impl ChanServer {
         })
         .to_string())
     }
+
+    #[tool(description = "Inject text into a running session (send more data)")]
+    async fn chan_inject(&self, Parameters(a): Parameters<InjectArgs>) -> Result<String, McpError> {
+        let c = self.live_client(&a.opencode);
+        c.inject(&SessionRef::new(a.session), &a.text)
+            .await
+            .map_err(internal)?;
+        Ok(serde_json::json!({ "injected": true }).to_string())
+    }
+
+    #[tool(description = "Interrupt (abort) a running session's active execution")]
+    async fn chan_interrupt(
+        &self,
+        Parameters(a): Parameters<SessionArgs>,
+    ) -> Result<String, McpError> {
+        let c = self.live_client(&a.opencode);
+        let interrupted = c
+            .interrupt(&SessionRef::new(a.session))
+            .await
+            .map_err(internal)?;
+        Ok(serde_json::json!({ "interrupted": interrupted }).to_string())
+    }
+
+    #[tool(description = "List live sessions")]
+    async fn chan_active(&self, Parameters(a): Parameters<ActiveArgs>) -> Result<String, McpError> {
+        let c = self.live_client(&a.opencode);
+        let sessions: Vec<String> = c
+            .active()
+            .await
+            .map_err(internal)?
+            .into_iter()
+            .map(|s| s.as_str().to_string())
+            .collect();
+        serde_json::to_string(&sessions).map_err(internal)
+    }
 }
 
 #[tool_handler(router = self.tool_router.clone())]
@@ -285,7 +358,8 @@ impl ServerHandler for ChanServer {
             .with_server_info(Implementation::new("chan", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Durable channel for orchestrating agents: chan_send / chan_publish / \
-                 chan_recv / chan_await / chan_room / chan_subscribe / chan_ack / chan_inbox.",
+                 chan_recv / chan_await / chan_room / chan_subscribe / chan_ack / chan_inbox. \
+                 Live control of running sessions: chan_inject / chan_interrupt / chan_active.",
             );
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
         info
@@ -295,7 +369,7 @@ impl ServerHandler for ChanServer {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let server = ChanServer::new(cli.dir, ParticipantId::new(cli.as_));
+    let server = ChanServer::new(cli.dir, ParticipantId::new(cli.as_), cli.opencode);
     let service = server.serve(stdio()).await?;
     service.waiting().await?;
     Ok(())
