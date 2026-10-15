@@ -13,7 +13,7 @@ impl Backend for OpencodeClient {
         session: &'a SessionRef,
         text: &'a str,
     ) -> BoxFuture<'a, Result<(), LiveError>> {
-        Box::pin(async move { self.prompt_async(session.as_str(), text).await })
+        Box::pin(async move { self.prompt(session.as_str(), text).await })
     }
 
     fn interrupt<'a>(&'a self, session: &'a SessionRef) -> BoxFuture<'a, Result<bool, LiveError>> {
@@ -22,8 +22,8 @@ impl Backend for OpencodeClient {
 
     fn active(&self) -> BoxFuture<'_, Result<Vec<SessionRef>, LiveError>> {
         Box::pin(async move {
-            let map = self.status().await?;
-            Ok(map.keys().map(|k| SessionRef::new(k.clone())).collect())
+            let ids = self.active_ids().await?;
+            Ok(ids.into_iter().map(SessionRef::new).collect())
         })
     }
 }
@@ -38,11 +38,11 @@ mod tests {
     async fn inject_posts_the_text_as_a_part() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/session/ses_x/prompt_async"))
-            .and(body_json(
-                serde_json::json!({ "parts": [ { "type": "text", "text": "more data" } ] }),
-            ))
-            .respond_with(ResponseTemplate::new(204))
+            .and(path("/api/session/ses_x/prompt"))
+            .and(body_json(serde_json::json!({ "text": "more data" })))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "data": {} })),
+            )
             .expect(1)
             .mount(&server)
             .await;
@@ -56,10 +56,10 @@ mod tests {
     async fn active_maps_status_keys_to_session_refs() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/session/status"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({ "ses_a": { "type": "busy" }, "ses_b": { "type": "idle" } }),
-            ))
+            .and(path("/api/session/active"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": { "ses_a": { "type": "running" }, "ses_b": { "type": "running" } }
+            })))
             .mount(&server)
             .await;
         let c = OpencodeClient::new(server.uri());

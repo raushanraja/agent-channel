@@ -27,9 +27,12 @@ struct Cli {
     /// This server's participant identity.
     #[arg(long = "as", env = "CHAN_PARTICIPANT", default_value = "orchestrator")]
     as_: String,
-    /// Base URL of the opencode server used by the live tools.
+    /// Root URL of the opencode server used by the live tools (API at /api).
     #[arg(long, env = "CHAN_OPENCODE", default_value = "http://127.0.0.1:4096")]
     opencode: String,
+    /// Server password printed by `opencode serve`.
+    #[arg(long, env = "OPENCODE_PASSWORD")]
+    opencode_password: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -127,6 +130,7 @@ struct ChanServer {
     dir: PathBuf,
     identity: ParticipantId,
     opencode: String,
+    opencode_password: Option<String>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -169,11 +173,17 @@ fn parse_addr(s: &str) -> Result<Address, McpError> {
 
 #[tool_router]
 impl ChanServer {
-    fn new(dir: PathBuf, identity: ParticipantId, opencode: String) -> Self {
+    fn new(
+        dir: PathBuf,
+        identity: ParticipantId,
+        opencode: String,
+        opencode_password: Option<String>,
+    ) -> Self {
         Self {
             dir,
             identity,
             opencode,
+            opencode_password,
             tool_router: Self::tool_router(),
         }
     }
@@ -183,7 +193,8 @@ impl ChanServer {
     }
 
     fn live_client(&self, opencode: &Option<String>) -> OpencodeClient {
-        OpencodeClient::new(opencode.clone().unwrap_or_else(|| self.opencode.clone()))
+        let base = opencode.clone().unwrap_or_else(|| self.opencode.clone());
+        OpencodeClient::with_password(base, self.opencode_password.clone())
     }
 
     fn participant(&self, p: &Option<String>) -> ParticipantId {
@@ -369,7 +380,12 @@ impl ServerHandler for ChanServer {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let server = ChanServer::new(cli.dir, ParticipantId::new(cli.as_), cli.opencode);
+    let server = ChanServer::new(
+        cli.dir,
+        ParticipantId::new(cli.as_),
+        cli.opencode,
+        cli.opencode_password,
+    );
     let service = server.serve(stdio()).await?;
     service.waiting().await?;
     Ok(())

@@ -38,6 +38,9 @@ pub enum LiveError {
     /// The engine could not be reached — callers should degrade to the durable log.
     #[error("live backend unavailable")]
     Unavailable,
+    /// The engine rejected our credentials.
+    #[error("live backend unauthorized: {0}")]
+    Unauthorized(String),
     /// The session is unknown to the engine.
     #[error("session not found: {0}")]
     NotFound(String),

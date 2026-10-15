@@ -132,9 +132,12 @@ enum Cmd {
         participant: String,
         #[arg(long)]
         session: String,
-        /// Base URL of the opencode server.
+        /// Root URL of the opencode server (the API is mounted at /api).
         #[arg(long, env = "CHAN_OPENCODE", default_value = "http://127.0.0.1:4096")]
         opencode: String,
+        /// Server password (printed by `opencode serve`).
+        #[arg(long, env = "OPENCODE_PASSWORD")]
+        opencode_password: Option<String>,
         /// Drain the inbox once and exit instead of following.
         #[arg(long)]
         once: bool,
@@ -146,9 +149,12 @@ enum Cmd {
     Interrupt {
         #[arg(long)]
         session: String,
-        /// Base URL of the opencode server.
+        /// Root URL of the opencode server (the API is mounted at /api).
         #[arg(long, env = "CHAN_OPENCODE", default_value = "http://127.0.0.1:4096")]
         opencode: String,
+        /// Server password (printed by `opencode serve`).
+        #[arg(long, env = "OPENCODE_PASSWORD")]
+        opencode_password: Option<String>,
     },
     /// Stream messages from your inbox.
     Pump {
@@ -426,10 +432,11 @@ fn main() -> Result<()> {
             participant,
             session,
             opencode,
+            opencode_password,
             once,
             poll_ms,
         } => {
-            let live = OpencodeClient::new(opencode);
+            let live = OpencodeClient::with_password(opencode, opencode_password);
             let who = ParticipantId::new(participant);
             let session = SessionRef::new(session);
             let scope = format!("inbox:{who}");
@@ -452,8 +459,12 @@ fn main() -> Result<()> {
                 std::thread::sleep(Duration::from_millis(poll_ms));
             }
         }
-        Cmd::Interrupt { session, opencode } => {
-            let live = OpencodeClient::new(opencode);
+        Cmd::Interrupt {
+            session,
+            opencode,
+            opencode_password,
+        } => {
+            let live = OpencodeClient::with_password(opencode, opencode_password);
             let rt = tokio::runtime::Runtime::new()?;
             let interrupted = rt.block_on(live.interrupt(&SessionRef::new(session)))?;
             print_json(&serde_json::json!({ "interrupted": interrupted }));

@@ -48,9 +48,10 @@ chan interrupt --session ses_…                  # stop a running session
 
 `chan attach` is the **live bridge**: durable-first, it reads a participant's inbox and
 injects each message into a running opencode session (`--once` drains and exits; default
-follows). `--opencode <url>` selects the server (default `http://127.0.0.1:4096`).
-`chan interrupt` aborts a session's active execution. Both degrade: if the server is
-down, `attach` keeps the durable log intact; `interrupt` fails loudly.
+follows). `--opencode <url>` is the server root (default `http://127.0.0.1:4096`; the API
+is at `/api`), and `--opencode-password` / `OPENCODE_PASSWORD` is the password printed by
+`opencode serve`. `chan interrupt` aborts a session's active execution. Both degrade: if
+the server is down, `attach` keeps the durable log intact; `interrupt` fails loudly.
 
 `--dir` / `CHAN_DIR` select the channel directory (default `.chan`). Output is JSON.
 Exit codes: `0` ok, `3` timeout/no-message, `2` usage, `1` error.
