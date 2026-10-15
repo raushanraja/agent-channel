@@ -1,0 +1,27 @@
+[package]
+name = "chan-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "chan"
+path = "src/main.rs"
+
+[dependencies]
+chan-core = { path = "../chan-core" }
+chan-opencode = { path = "../chan-opencode" }
+clap = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+tempfile = { workspace = true }

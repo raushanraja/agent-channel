@@ -62,8 +62,8 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "fs", "io-util"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls-tls"] }
-rmcp = { version = "3", features = ["server", "transport-io"] }
+reqwest = { version = "0.13", features = ["json", "stream"] }
+rmcp = "3"
 tempfile = "3"
 assert_cmd = "2"
 wiremock = "0.6"
