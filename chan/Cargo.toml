@@ -12,15 +12,17 @@ license = "MIT"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-uuid = { version = "1", features = ["v7", "serde"] }
+uuid = { version = "1", features = ["v7", "v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 fs4 = "1"
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "fs", "io-util"] }
-reqwest = { version = "0.13", features = ["json", "stream"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "fs", "io-util", "net"] }
+reqwest = { version = "0.13", features = ["json", "stream", "blocking"] }
+axum = "0.8"
+tower-http = { version = "0.7", features = ["trace"] }
 rmcp = { version = "3", features = ["transport-io"] }
 schemars = { version = "1", features = ["derive"] }
 futures = "0.3"
