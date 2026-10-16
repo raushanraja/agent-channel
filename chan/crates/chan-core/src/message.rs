@@ -83,6 +83,9 @@ pub struct Message {
     /// Optional time-to-live in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttl_secs: Option<u64>,
+    /// The engine session that produced this message, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 impl Message {
@@ -102,6 +105,7 @@ impl Message {
             reply_to: None,
             payload,
             ttl_secs: None,
+            session_id: None,
         }
     }
 
@@ -223,5 +227,33 @@ mod tests {
         m.ttl_secs = Some(0);
         m.ts = Utc::now() - chrono::Duration::seconds(5);
         assert!(m.is_expired(Utc::now()));
+    }
+
+    #[test]
+    fn message_session_id_roundtrips() {
+        let mut m = Message::task(
+            ParticipantId::new("w1"),
+            Address::Direct(ParticipantId::new("orch")),
+            serde_json::json!("hi"),
+        );
+        m.session_id = Some("ses_abc".to_string());
+        let s = serde_json::to_string(&m).unwrap();
+        let back: Message = serde_json::from_str(&s).unwrap();
+        assert_eq!(m, back);
+        assert!(s.contains("\"session_id\""));
+    }
+
+    #[test]
+    fn message_session_id_absent_is_none() {
+        let m = Message::task(
+            ParticipantId::new("w1"),
+            Address::Direct(ParticipantId::new("orch")),
+            serde_json::json!("hi"),
+        );
+        let mut v = serde_json::to_value(&m).unwrap();
+        v.as_object_mut().unwrap().remove("session_id");
+        let s = serde_json::to_string(&v).unwrap();
+        let back: Message = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.session_id, None);
     }
 }

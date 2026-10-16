@@ -179,16 +179,18 @@ impl Channel for FileBackend {
 
     fn recv_room(
         &self,
-        _who: &ParticipantId,
+        who: &ParticipantId,
         room: &RoomId,
         cursor: Cursor,
         limit: usize,
     ) -> Result<(Vec<Message>, Cursor)> {
-        self.read_messages(
+        let (all_msgs, next) = self.read_messages(
             &self.root.join("rooms").join(format!("{room}.jsonl")),
             cursor,
             limit,
-        )
+        )?;
+        let filtered = all_msgs.into_iter().filter(|m| m.from != *who).collect();
+        Ok((filtered, next))
     }
 
     fn subscribe(&self, who: &ParticipantId, room: &RoomId) -> Result<Cursor> {

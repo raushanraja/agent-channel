@@ -78,7 +78,7 @@ mod tests {
         let p = ParticipantId::new("w1");
         let cur = r.subscribe(&p, &RoomId::new("all")).unwrap();
         r.send(&Message::progress(
-            ParticipantId::new("w1"),
+            ParticipantId::new("w2"),
             Address::Broadcast,
             serde_json::json!("halfway"),
         ))

@@ -1,6 +1,6 @@
 //! A backend whose engine is permanently down — forces the durable-only path in tests.
 
-use crate::port::{Backend, BoxFuture, LiveError, SessionRef};
+use crate::port::{Backend, BoxFuture, LiveError, SessionRef, SessionStatus};
 
 /// A [`Backend`] that always reports [`LiveError::Unavailable`].
 #[derive(Debug, Default, Clone, Copy)]
@@ -22,6 +22,21 @@ impl Backend for NoopBackend {
     fn active(&self) -> BoxFuture<'_, Result<Vec<SessionRef>, LiveError>> {
         Box::pin(async { Err(LiveError::Unavailable) })
     }
+
+    fn status<'a>(
+        &'a self,
+        _session: &'a SessionRef,
+    ) -> BoxFuture<'a, Result<SessionStatus, LiveError>> {
+        Box::pin(async { Err(LiveError::Unavailable) })
+    }
+
+    fn wait_idle<'a>(
+        &'a self,
+        _session: &'a SessionRef,
+        _timeout: std::time::Duration,
+    ) -> BoxFuture<'a, Result<SessionStatus, LiveError>> {
+        Box::pin(async { Err(LiveError::Unavailable) })
+    }
 }
 
 #[cfg(test)]
@@ -38,5 +53,10 @@ mod tests {
         ));
         assert!(matches!(b.interrupt(&s).await, Err(LiveError::Unavailable)));
         assert!(matches!(b.active().await, Err(LiveError::Unavailable)));
+        assert!(matches!(b.status(&s).await, Err(LiveError::Unavailable)));
+        assert!(matches!(
+            b.wait_idle(&s, std::time::Duration::from_secs(1)).await,
+            Err(LiveError::Unavailable)
+        ));
     }
 }

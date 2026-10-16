@@ -1,5 +1,6 @@
 //! The live-session port: opaque sessions, a stable control trait, a degrade signal.
 
+use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::pin::Pin;
 use thiserror::Error;
@@ -52,6 +53,22 @@ pub enum LiveError {
     Transport(String),
 }
 
+/// What the engine says about a session right now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum SessionStatus {
+    /// The session's agent loop is actively executing.
+    Running,
+    /// The agent loop is idle; `outcome` is the engine's verdict.
+    Idle {
+        /// `"succeeded"`, `"failed"`, `"interrupted"`, or absent if the
+        /// session is idle but has never completed a turn.
+        outcome: Option<String>,
+    },
+    /// The engine has no record of this session.
+    NotFound,
+}
+
 /// Control a live agent session. Implemented by engine adapters.
 ///
 /// All methods are object-safe so call sites can hold a `Box<dyn Backend>` (or `Arc`) and
@@ -79,6 +96,30 @@ pub trait Backend: Send + Sync {
     /// # Errors
     /// [`LiveError::Unavailable`] when the engine is down (the degrade signal).
     fn active(&self) -> BoxFuture<'_, Result<Vec<SessionRef>, LiveError>>;
+
+    /// Snapshot the status of a single session.
+    ///
+    /// # Errors
+    /// [`LiveError::Unavailable`] when the engine is down (the degrade signal).
+    fn status<'a>(
+        &'a self,
+        _session: &'a SessionRef,
+    ) -> BoxFuture<'a, Result<SessionStatus, LiveError>> {
+        Box::pin(async { Err(LiveError::Unavailable) })
+    }
+
+    /// Block until the session's agent loop becomes idle, or until `timeout`
+    /// elapses. Returns the status at the moment it unblocked.
+    ///
+    /// # Errors
+    /// [`LiveError::Unavailable`] when the engine is down (the degrade signal).
+    fn wait_idle<'a>(
+        &'a self,
+        _session: &'a SessionRef,
+        _timeout: std::time::Duration,
+    ) -> BoxFuture<'a, Result<SessionStatus, LiveError>> {
+        Box::pin(async { Err(LiveError::Unavailable) })
+    }
 }
 
 #[cfg(test)]
@@ -91,5 +132,32 @@ mod tests {
         assert_eq!(s.as_str(), "ses_abc");
         assert_eq!(s.to_string(), "ses_abc");
         assert_eq!(s, SessionRef::new("ses_abc"));
+    }
+
+    #[test]
+    fn session_status_variants_serde() {
+        let cases = [
+            (SessionStatus::Running, r#"{"state":"running"}"#),
+            (
+                SessionStatus::Idle {
+                    outcome: Some("succeeded".into()),
+                },
+                r#"{"state":"idle","outcome":"succeeded"}"#,
+            ),
+            (
+                SessionStatus::Idle { outcome: None },
+                r#"{"state":"idle","outcome":null}"#,
+            ),
+            (SessionStatus::NotFound, r#"{"state":"not_found"}"#),
+        ];
+        for (val, json) in cases {
+            let s = serde_json::to_string(&val).unwrap();
+            // compare parsed values to avoid spacing/order surprises
+            let a: serde_json::Value = serde_json::from_str(&s).unwrap();
+            let b: serde_json::Value = serde_json::from_str(json).unwrap();
+            assert_eq!(a, b, "serialize mismatch for {val:?}");
+            let back: SessionStatus = serde_json::from_str(&s).unwrap();
+            assert_eq!(back, val);
+        }
     }
 }

@@ -5,7 +5,7 @@
 //! Swapping engines means a new adapter crate — no call site changes.
 
 use crate::client::OpencodeClient;
-use chan_live::{Backend, BoxFuture, LiveError, SessionRef};
+use chan_live::{Backend, BoxFuture, LiveError, SessionRef, SessionStatus};
 
 impl Backend for OpencodeClient {
     fn inject<'a>(
@@ -25,6 +25,21 @@ impl Backend for OpencodeClient {
             let ids = self.active_ids().await?;
             Ok(ids.into_iter().map(SessionRef::new).collect())
         })
+    }
+
+    fn status<'a>(
+        &'a self,
+        session: &'a SessionRef,
+    ) -> BoxFuture<'a, Result<SessionStatus, LiveError>> {
+        Box::pin(async move { self.status(session.as_str()).await })
+    }
+
+    fn wait_idle<'a>(
+        &'a self,
+        session: &'a SessionRef,
+        timeout: std::time::Duration,
+    ) -> BoxFuture<'a, Result<SessionStatus, LiveError>> {
+        Box::pin(async move { self.wait_idle(session.as_str(), timeout).await })
     }
 }
 

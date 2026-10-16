@@ -18,9 +18,10 @@
 //! Errors are the port's [`LiveError`]. A connect failure maps to
 //! [`LiveError::Unavailable`] — the degrade signal.
 
-use chan_live::LiveError;
+use chan_live::{LiveError, SessionStatus};
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
+use std::collections::HashMap;
 use std::pin::Pin;
 
 /// The fixed Basic-auth username the opencode server expects.
@@ -120,6 +121,84 @@ impl OpencodeClient {
         Ok(data.keys().cloned().collect())
     }
 
+    /// Snapshot of a session's status (`GET /session/active` then `/session/{id}`).
+    ///
+    /// # Errors
+    /// [`LiveError::Unauthorized`] on bad credentials; [`LiveError::Unavailable`] when the
+    /// server is down.
+    pub async fn status(&self, session: &str) -> Result<SessionStatus, LiveError> {
+        // Active map: if session id present → Running.
+        if let Ok(v) = self.get_json("/session/active").await {
+            let active = v
+                .get("data")
+                .map(|d| {
+                    if let Some(obj) = d.as_object() {
+                        obj.contains_key(session)
+                    } else if let Some(arr) = d.as_array() {
+                        arr.iter().any(|x| {
+                            x.as_str() == Some(session)
+                                || x.get("id").and_then(serde_json::Value::as_str) == Some(session)
+                        })
+                    } else {
+                        false
+                    }
+                })
+                .unwrap_or(false);
+            if active {
+                return Ok(SessionStatus::Running);
+            }
+        }
+        // Fallback: fetch session record; 404 → NotFound, else idle with outcome.
+        match self.get_json(&format!("/session/{session}")).await {
+            Ok(v) => Ok(SessionStatus::Idle {
+                outcome: outcome_of(&v),
+            }),
+            Err(LiveError::NotFound(_)) => Ok(SessionStatus::NotFound),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Block until a session becomes idle (`POST /experimental/session/{id}/wait`).
+    ///
+    /// # Errors
+    /// [`LiveError::Unauthorized`] on bad credentials; [`LiveError::Unavailable`] when the
+    /// server is down.
+    pub async fn wait_idle(
+        &self,
+        session: &str,
+        timeout: std::time::Duration,
+    ) -> Result<SessionStatus, LiveError> {
+        let path = format!("/experimental/session/{session}/wait");
+        match tokio::time::timeout(timeout, self.post_json(&path, &serde_json::json!({}))).await {
+            Ok(Ok(_)) => match self.get_json(&format!("/session/{session}")).await {
+                Ok(v) => Ok(SessionStatus::Idle {
+                    outcome: outcome_of(&v),
+                }),
+                Err(LiveError::NotFound(_)) => Ok(SessionStatus::NotFound),
+                Err(e) => Err(e),
+            },
+            Ok(Err(LiveError::NotFound(_))) => Ok(SessionStatus::NotFound),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Ok(SessionStatus::Running),
+        }
+    }
+
+    /// PUT environment variables for a session (`PUT /session/{id}/environment`).
+    ///
+    /// # Errors
+    /// [`LiveError::Unauthorized`] on bad credentials; [`LiveError::Unavailable`] when the
+    /// server is down.
+    pub async fn set_environment(
+        &self,
+        session: &str,
+        vars: &HashMap<String, String>,
+    ) -> Result<(), LiveError> {
+        let body = serde_json::json!({ "variables": vars });
+        self.put_json(&format!("/session/{session}/environment"), &body)
+            .await?;
+        Ok(())
+    }
+
     /// Durable message history for a session.
     ///
     /// # Errors
@@ -187,6 +266,31 @@ impl OpencodeClient {
             .map_err(classify)?;
         decode(resp).await
     }
+
+    async fn put_json(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, LiveError> {
+        let resp = self
+            .auth(self.http.put(self.url(path)).json(body))
+            .send()
+            .await
+            .map_err(classify)?;
+        decode(resp).await
+    }
+}
+
+/// Extract an `outcome` string from a session record, supporting both
+/// `data.outcome` and a top-level `outcome` field.
+fn outcome_of(v: &serde_json::Value) -> Option<String> {
+    let candidate = v
+        .get("data")
+        .and_then(|d| d.get("outcome"))
+        .or_else(|| v.get("outcome"));
+    candidate
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
 }
 
 /// Build an error for a non-success response, mapping 401/404 specially.
@@ -315,5 +419,121 @@ mod tests {
             OpencodeClient::new("http://h:4096/api").api_base(),
             "http://h:4096/api"
         );
+    }
+
+    #[tokio::test]
+    async fn status_running_when_in_active() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/session/active"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "data": { "ses_x": {} } })),
+            )
+            .mount(&server)
+            .await;
+        let c = OpencodeClient::new(server.uri());
+        assert_eq!(
+            c.status("ses_x").await.unwrap(),
+            chan_live::SessionStatus::Running
+        );
+    }
+
+    #[tokio::test]
+    async fn status_idle_when_not_active() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/session/active"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "data": {} })),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/session/ses_x"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "data": { "outcome": "succeeded" } })),
+            )
+            .mount(&server)
+            .await;
+        let c = OpencodeClient::new(server.uri());
+        assert_eq!(
+            c.status("ses_x").await.unwrap(),
+            chan_live::SessionStatus::Idle {
+                outcome: Some("succeeded".into())
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn status_not_found_on_404() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/session/active"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "data": {} })),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/session/missing"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        let c = OpencodeClient::new(server.uri());
+        assert_eq!(
+            c.status("missing").await.unwrap(),
+            chan_live::SessionStatus::NotFound
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_idle_blocks_until_204() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/experimental/session/ses_x/wait"))
+            .respond_with(
+                ResponseTemplate::new(204).set_delay(std::time::Duration::from_millis(50)),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/session/ses_x"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "data": { "outcome": "succeeded" } })),
+            )
+            .mount(&server)
+            .await;
+        let c = OpencodeClient::new(server.uri());
+        let status = c
+            .wait_idle("ses_x", std::time::Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert_eq!(
+            status,
+            chan_live::SessionStatus::Idle {
+                outcome: Some("succeeded".into())
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn set_environment_puts_vars() {
+        let server = MockServer::start().await;
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("FOO".to_string(), "bar".to_string());
+        Mock::given(method("PUT"))
+            .and(path("/api/session/ses_x/environment"))
+            .and(body_json(
+                serde_json::json!({ "variables": { "FOO": "bar" } }),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let c = OpencodeClient::new(server.uri());
+        c.set_environment("ses_x", &vars).await.unwrap();
     }
 }

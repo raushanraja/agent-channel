@@ -10,4 +10,4 @@ pub mod noop;
 pub mod port;
 
 pub use noop::NoopBackend;
-pub use port::{Backend, BoxFuture, LiveError, SessionRef};
+pub use port::{Backend, BoxFuture, LiveError, SessionRef, SessionStatus};
