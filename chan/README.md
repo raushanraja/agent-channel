@@ -133,6 +133,35 @@ single shared secret for now; TLS/ACLs/rotation are future work.
 Logs are append-only with a per-file `flock` and `fsync`; a partial trailing line
 (a crash mid-write) is ignored. Cursors and acks are written atomically (temp + rename).
 
+## Per-sender audit (query "all messages by X")
+
+```bash
+chan history --from orch                 # everything orch authored, any destination
+chan history --from orch --kind result   # filter by kind
+```
+
+Over the network: `GET /v1/messages?from=orch` → `{messages}` (auth). In MCP:
+`chan_history {from, kind?, to?, limit?}`. Messages are scanned across every inbox and
+room log and returned in time order. Add to the HTTP API table above:
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/v1/messages` | `?from=<id>`; auth; `{messages}` |
+
+## Attaching to Claude Code
+
+Claude Code reads `.mcp.json` at the project root; this repo ships one that launches
+`chan-mcp --as orchestrator`, plus `.claude-plugin/{plugin.json,marketplace.json}` so it
+can be installed as a Claude plugin. The crate `chan-claude` is the thin adapter
+(degrades via `NoopBackend`; exposes `mcp_config(participant)` and `project_mcp_path`).
+
+## MCP tools (full list)
+
+Send: `chan_send`, `chan_publish`, `chan_recv`, `chan_await`, `chan_room`,
+`chan_subscribe`, `chan_ack`, `chan_inbox`, `chan_history`.
+Live control (running sessions): `chan_inject`, `chan_interrupt`, `chan_active`,
+`chan_status`, `chan_wait`, `chan_env`.
+
 ## Build & test
 
 ```bash
