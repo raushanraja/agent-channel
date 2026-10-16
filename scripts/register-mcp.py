@@ -38,4 +38,3 @@ with open(backup, "w", encoding="utf-8") as f:
 with open(path, "w", encoding="utf-8") as f:
     f.write(text)
 print("registered chan MCP server in", path)
-"""
