@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![cfg_attr(not(test), forbid(unsafe_code))]
 //! `chan-core` — the channel protocol and durable file backend.
 //!
 //! Messages travel over a durable, append-only file log (the source of truth); a live

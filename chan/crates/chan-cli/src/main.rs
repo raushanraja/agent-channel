@@ -7,9 +7,9 @@ use anyhow::{Context, Result, anyhow};
 use chan_client::RemoteBackend;
 use chan_core::{
     Address, Channel, ChannelStats, Cursor, FileBackend, Message, MessageId, MessageKind,
-    ParticipantId, RoomId,
+    ParticipantId, RoomId, resolve_participant,
 };
-use chan_live::{Backend, SessionRef};
+use chan_live::{Backend, SessionRef, SessionStatus};
 use chan_opencode::connect;
 use clap::{Parser, Subcommand};
 use std::collections::HashMap;
@@ -49,7 +49,7 @@ enum Cmd {
     /// Send a message (direct / room / broadcast).
     Send {
         #[arg(long)]
-        from: String,
+        from: Option<String>,
         #[arg(long)]
         to: String,
         #[arg(long, default_value = "task")]
@@ -68,7 +68,7 @@ enum Cmd {
         #[arg(long)]
         room: String,
         #[arg(long)]
-        from: String,
+        from: Option<String>,
         #[arg(long, default_value = "event")]
         kind: String,
         #[arg(long)]
@@ -77,7 +77,7 @@ enum Cmd {
     /// Read your direct inbox and advance your cursor.
     Recv {
         #[arg(long = "as")]
-        as_: String,
+        as_: Option<String>,
         #[arg(long)]
         cursor: Option<u64>,
         #[arg(long, default_value_t = 100)]
@@ -86,18 +86,20 @@ enum Cmd {
     /// Read a room and advance your subscription cursor.
     Room {
         #[arg(long = "as")]
-        as_: String,
+        as_: Option<String>,
         #[arg(long)]
         room: String,
         #[arg(long)]
         cursor: Option<u64>,
         #[arg(long, default_value_t = 100)]
         limit: usize,
+        #[arg(long)]
+        include_self: bool,
     },
     /// Block until a matching message arrives (exit 3 on timeout).
     Await {
         #[arg(long = "as")]
-        as_: String,
+        as_: Option<String>,
         #[arg(long)]
         kind: Option<String>,
         #[arg(long, default_value = "30s")]
@@ -106,21 +108,21 @@ enum Cmd {
     /// Subscribe to a room (creates your cursor).
     Subscribe {
         #[arg(long = "as")]
-        as_: String,
+        as_: Option<String>,
         #[arg(long)]
         room: String,
     },
     /// Acknowledge a message id.
     Ack {
         #[arg(long = "as")]
-        as_: String,
+        as_: Option<String>,
         #[arg(long)]
         id: String,
     },
     /// Show an inbox's cursor and unread count.
     Inbox {
         #[arg(long = "as")]
-        as_: String,
+        as_: Option<String>,
     },
     /// List rooms.
     Rooms,
@@ -129,7 +131,7 @@ enum Cmd {
     /// Bridge a participant's inbox into a live opencode session (durable-first).
     Attach {
         #[arg(long)]
-        participant: String,
+        participant: Option<String>,
         #[arg(long)]
         session: String,
         /// Root URL of the opencode server (the API is mounted at /api).
@@ -161,9 +163,49 @@ enum Cmd {
     /// Stream messages from your inbox.
     Pump {
         #[arg(long = "as")]
-        as_: String,
+        as_: Option<String>,
         #[arg(long)]
         follow: bool,
+    },
+    /// Show status of a live opencode session.
+    Status {
+        #[arg(long)]
+        session: String,
+        /// Root URL of the opencode server (the API is mounted at /api).
+        /// Omit to auto-discover a running background service.
+        #[arg(long, env = "CHAN_OPENCODE")]
+        opencode: Option<String>,
+        /// Server password (`OPENCODE_PASSWORD`). Auto-discovered when omitted.
+        #[arg(long, env = "OPENCODE_PASSWORD")]
+        opencode_password: Option<String>,
+    },
+    /// Block until a live opencode session becomes idle.
+    Wait {
+        #[arg(long)]
+        session: String,
+        #[arg(long, default_value = "60s")]
+        timeout: String,
+        /// Root URL of the opencode server (the API is mounted at /api).
+        /// Omit to auto-discover a running background service.
+        #[arg(long, env = "CHAN_OPENCODE")]
+        opencode: Option<String>,
+        /// Server password (`OPENCODE_PASSWORD`). Auto-discovered when omitted.
+        #[arg(long, env = "OPENCODE_PASSWORD")]
+        opencode_password: Option<String>,
+    },
+    /// Set environment variables on a live opencode session.
+    Env {
+        #[arg(long)]
+        session: String,
+        #[arg(long = "set", value_name = "KEY=VAL")]
+        set: Vec<String>,
+        /// Root URL of the opencode server (the API is mounted at /api).
+        /// Omit to auto-discover a running background service.
+        #[arg(long, env = "CHAN_OPENCODE")]
+        opencode: Option<String>,
+        /// Server password (`OPENCODE_PASSWORD`). Auto-discovered when omitted.
+        #[arg(long, env = "OPENCODE_PASSWORD")]
+        opencode_password: Option<String>,
     },
 }
 
@@ -321,11 +363,8 @@ fn main() -> Result<()> {
             corr,
             ttl,
         } => {
-            let mut m = Message::task(
-                ParticipantId::new(from),
-                parse_addr(&to)?,
-                parse_payload(&payload)?,
-            );
+            let from = resolve_participant(from.as_deref(), "orchestrator");
+            let mut m = Message::task(from, parse_addr(&to)?, parse_payload(&payload)?);
             m.kind = parse_kind(&kind)?;
             m.ttl_secs = ttl;
             if let Some(r) = reply_to {
@@ -334,6 +373,7 @@ fn main() -> Result<()> {
             if let Some(c) = corr {
                 m.correlation_id = Some(MessageId::parse(&c)?);
             }
+            m.session_id = std::env::var("OPENCODE_SESSION_ID").ok();
             let id = chan.send(&m)?;
             print_json(&serde_json::json!({ "id": id.to_string() }));
         }
@@ -343,17 +383,19 @@ fn main() -> Result<()> {
             kind,
             payload,
         } => {
+            let from = resolve_participant(from.as_deref(), "orchestrator");
             let mut m = Message::task(
-                ParticipantId::new(from),
+                from,
                 Address::Room(RoomId::new(room)),
                 parse_payload(&payload)?,
             );
             m.kind = parse_kind(&kind)?;
+            m.session_id = std::env::var("OPENCODE_SESSION_ID").ok();
             let id = chan.send(&m)?;
             print_json(&serde_json::json!({ "id": id.to_string() }));
         }
         Cmd::Recv { as_, cursor, limit } => {
-            let who = ParticipantId::new(as_);
+            let who = resolve_participant(as_.as_deref(), "orchestrator");
             let scope = format!("inbox:{who}");
             let from = cursor.unwrap_or(chan.cursor(&scope)?);
             let (msgs, next) = chan.recv_direct(&who, from, limit)?;
@@ -365,17 +407,23 @@ fn main() -> Result<()> {
             room,
             cursor,
             limit,
+            include_self,
         } => {
-            let who = ParticipantId::new(as_);
+            let who = resolve_participant(as_.as_deref(), "orchestrator");
             let room = RoomId::new(room);
             let scope = format!("sub:{who}:{room}");
             let from = cursor.unwrap_or(chan.cursor(&scope)?);
-            let (msgs, next) = chan.recv_room(&who, &room, from, limit)?;
+            let read_who = if include_self {
+                ParticipantId::new("_")
+            } else {
+                who.clone()
+            };
+            let (msgs, next) = chan.recv_room(&read_who, &room, from, limit)?;
             chan.set_cursor(&scope, next)?;
             print_json(&serde_json::json!(msgs));
         }
         Cmd::Await { as_, kind, timeout } => {
-            let who = ParticipantId::new(as_);
+            let who = resolve_participant(as_.as_deref(), "orchestrator");
             let scope = format!("inbox:{who}");
             let want = kind.as_deref().map(parse_kind).transpose()?;
             let deadline = Instant::now() + parse_duration(&timeout)?;
@@ -401,15 +449,17 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Subscribe { as_, room } => {
-            let cursor = chan.subscribe(&ParticipantId::new(as_), &RoomId::new(room))?;
+            let who = resolve_participant(as_.as_deref(), "orchestrator");
+            let cursor = chan.subscribe(&who, &RoomId::new(room))?;
             print_json(&serde_json::json!({ "cursor": cursor }));
         }
         Cmd::Ack { as_, id } => {
-            chan.ack(&ParticipantId::new(as_), &MessageId::parse(&id)?)?;
+            let who = resolve_participant(as_.as_deref(), "orchestrator");
+            chan.ack(&who, &MessageId::parse(&id)?)?;
             print_json(&serde_json::json!({ "acked": id }));
         }
         Cmd::Inbox { as_ } => {
-            let who = ParticipantId::new(as_);
+            let who = resolve_participant(as_.as_deref(), "orchestrator");
             let scope = format!("inbox:{who}");
             let cursor = chan.cursor(&scope)?;
             let (all, _) = chan.recv_direct(&who, 0, usize::MAX)?;
@@ -439,7 +489,8 @@ fn main() -> Result<()> {
             poll_ms,
         } => {
             let live = connect(opencode, opencode_password);
-            let who = ParticipantId::new(participant);
+            let who = resolve_participant(participant.as_deref(), "orchestrator");
+            let participant = who.as_str().to_string();
             let session = SessionRef::new(session);
             let scope = format!("inbox:{who}");
             let rt = tokio::runtime::Runtime::new()?;
@@ -447,6 +498,11 @@ fn main() -> Result<()> {
             loop {
                 let (msgs, next) = chan.recv_direct(&who, cursor, 1000)?;
                 for m in &msgs {
+                    let is_echo = m.session_id.as_deref() == Some(session.as_str())
+                        || m.from.as_str() == participant.as_str();
+                    if is_echo {
+                        continue;
+                    }
                     let text = serde_json::to_string(m)?;
                     match rt.block_on(live.inject(&session, &text)) {
                         Ok(()) => eprintln!("chan: injected {} -> {session}", m.id),
@@ -472,7 +528,7 @@ fn main() -> Result<()> {
             print_json(&serde_json::json!({ "interrupted": interrupted }));
         }
         Cmd::Pump { as_, follow } => {
-            let who = ParticipantId::new(as_);
+            let who = resolve_participant(as_.as_deref(), "orchestrator");
             let scope = format!("inbox:{who}");
             let mut cursor = chan.cursor(&scope)?;
             loop {
@@ -487,6 +543,48 @@ fn main() -> Result<()> {
                 }
                 std::thread::sleep(Duration::from_millis(150));
             }
+        }
+        Cmd::Status {
+            session,
+            opencode,
+            opencode_password,
+        } => {
+            let live = connect(opencode, opencode_password);
+            let rt = tokio::runtime::Runtime::new()?;
+            let st = rt.block_on(live.status(&session))?;
+            print_json(&serde_json::to_value(st)?);
+        }
+        Cmd::Wait {
+            session,
+            timeout,
+            opencode,
+            opencode_password,
+        } => {
+            let live = connect(opencode, opencode_password);
+            let rt = tokio::runtime::Runtime::new()?;
+            let st = rt.block_on(live.wait_idle(&session, parse_duration(&timeout)?))?;
+            print_json(&serde_json::to_value(st.clone())?);
+            if matches!(st, SessionStatus::Running) {
+                std::process::exit(3);
+            }
+        }
+        Cmd::Env {
+            session,
+            set,
+            opencode,
+            opencode_password,
+        } => {
+            let mut vars = HashMap::new();
+            for kv in set {
+                let (k, v) = kv
+                    .split_once('=')
+                    .ok_or_else(|| anyhow!("bad KEY=VAL: {kv}"))?;
+                vars.insert(k.to_string(), v.to_string());
+            }
+            let live = connect(opencode, opencode_password);
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(live.set_environment(&session, &vars))?;
+            print_json(&serde_json::json!({ "updated": vars.len() }));
         }
         Cmd::Serve { .. } | Cmd::Token => unreachable!("handled above"),
     }

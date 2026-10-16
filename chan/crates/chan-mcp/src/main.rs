@@ -1,10 +1,12 @@
 //! `chan-mcp` — the channel as an MCP server, so agents attach with native tools.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use chan_core::{
     Address, Channel, FileBackend, Message, MessageId, MessageKind, ParticipantId, RoomId,
+    resolve_participant,
 };
 use chan_live::{Backend, SessionRef};
 use chan_opencode::{OpencodeClient, connect};
@@ -25,8 +27,8 @@ struct Cli {
     #[arg(long, env = "CHAN_DIR", default_value = ".chan")]
     dir: PathBuf,
     /// This server's participant identity.
-    #[arg(long = "as", env = "CHAN_PARTICIPANT", default_value = "orchestrator")]
-    as_: String,
+    #[arg(long = "as", env = "CHAN_PARTICIPANT")]
+    as_: Option<String>,
     /// Root URL of the opencode server used by the live tools (API at /api).
     /// Omit to auto-discover a running background service.
     #[arg(long, env = "CHAN_OPENCODE")]
@@ -93,6 +95,15 @@ struct SubscribeArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+struct RoomArgs {
+    #[serde(default)]
+    participant: Option<String>,
+    room: String,
+    #[serde(default)]
+    include_self: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 struct AckArgs {
     #[serde(default)]
     participant: Option<String>,
@@ -126,10 +137,42 @@ struct ActiveArgs {
     opencode: Option<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+struct StatusArgs {
+    /// Live session id.
+    session: String,
+    /// Override the opencode server base URL.
+    #[serde(default)]
+    opencode: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct WaitArgs {
+    /// Live session id.
+    session: String,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+    /// Override the opencode server base URL.
+    #[serde(default)]
+    opencode: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct EnvArgs {
+    /// Live session id.
+    session: String,
+    /// Variables to set.
+    variables: HashMap<String, String>,
+    /// Override the opencode server base URL.
+    #[serde(default)]
+    opencode: Option<String>,
+}
+
 #[derive(Clone)]
 struct ChanServer {
     dir: PathBuf,
     identity: ParticipantId,
+    session_id: Option<String>,
     opencode: Option<String>,
     opencode_password: Option<String>,
     tool_router: ToolRouter<Self>,
@@ -177,12 +220,14 @@ impl ChanServer {
     fn new(
         dir: PathBuf,
         identity: ParticipantId,
+        session_id: Option<String>,
         opencode: Option<String>,
         opencode_password: Option<String>,
     ) -> Self {
         Self {
             dir,
             identity,
+            session_id,
             opencode,
             opencode_password,
             tool_router: Self::tool_router(),
@@ -219,6 +264,7 @@ impl ChanServer {
         if let Some(c) = a.correlation_id {
             m.correlation_id = Some(MessageId::parse(&c).map_err(|e| invalid(e.to_string()))?);
         }
+        m.session_id = self.session_id.clone();
         let id = b.send(&m).map_err(internal)?;
         Ok(serde_json::json!({ "id": id.to_string() }).to_string())
     }
@@ -233,6 +279,7 @@ impl ChanServer {
         if let Some(k) = a.kind {
             m.kind = parse_kind(&k)?;
         }
+        m.session_id = self.session_id.clone();
         let id = b.send(&m).map_err(internal)?;
         Ok(serde_json::json!({ "id": id.to_string() }).to_string())
     }
@@ -252,14 +299,23 @@ impl ChanServer {
         serde_json::to_string(&msgs).map_err(internal)
     }
 
-    #[tool(description = "Read a room and advance your subscription cursor")]
-    fn chan_room(&self, Parameters(a): Parameters<SubscribeArgs>) -> Result<String, McpError> {
+    #[tool(
+        description = "Read a room and advance your subscription cursor (include_self to read your own publishes)"
+    )]
+    fn chan_room(&self, Parameters(a): Parameters<RoomArgs>) -> Result<String, McpError> {
         let b = self.backend()?;
         let who = self.participant(&a.participant);
         let room = RoomId::new(a.room);
+        let read_who = if a.include_self == Some(true) {
+            ParticipantId::new("_")
+        } else {
+            who.clone()
+        };
         let scope = format!("sub:{who}:{room}");
         let from = b.cursor(&scope).map_err(internal)?;
-        let (msgs, next) = b.recv_room(&who, &room, from, 1000).map_err(internal)?;
+        let (msgs, next) = b
+            .recv_room(&read_who, &room, from, 1000)
+            .map_err(internal)?;
         b.set_cursor(&scope, next).map_err(internal)?;
         serde_json::to_string(&msgs).map_err(internal)
     }
@@ -361,6 +417,33 @@ impl ChanServer {
             .collect();
         serde_json::to_string(&sessions).map_err(internal)
     }
+
+    #[tool(description = "Snapshot a live session status")]
+    async fn chan_status(&self, Parameters(a): Parameters<StatusArgs>) -> Result<String, McpError> {
+        let c = self.live_client(&a.opencode);
+        let s = c.status(&a.session).await.map_err(internal)?;
+        serde_json::to_string(&s).map_err(internal)
+    }
+
+    #[tool(description = "Block until a session becomes idle or timeout")]
+    async fn chan_wait(&self, Parameters(a): Parameters<WaitArgs>) -> Result<String, McpError> {
+        let c = self.live_client(&a.opencode);
+        let timeout = Duration::from_millis(a.timeout_ms.unwrap_or(30_000));
+        let s = c.wait_idle(&a.session, timeout).await.map_err(internal)?;
+        if matches!(s, chan_live::SessionStatus::Running) {
+            return Ok(serde_json::json!({"timeout": true}).to_string());
+        }
+        serde_json::to_string(&s).map_err(internal)
+    }
+
+    #[tool(description = "Set environment variables for a live session")]
+    async fn chan_env(&self, Parameters(a): Parameters<EnvArgs>) -> Result<String, McpError> {
+        let c = self.live_client(&a.opencode);
+        c.set_environment(&a.session, &a.variables)
+            .await
+            .map_err(internal)?;
+        Ok(serde_json::json!({ "updated": true }).to_string())
+    }
 }
 
 #[tool_handler(router = self.tool_router.clone())]
@@ -381,9 +464,12 @@ impl ServerHandler for ChanServer {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    let identity = resolve_participant(cli.as_.as_deref(), "orchestrator");
+    let session_id = std::env::var("OPENCODE_SESSION_ID").ok();
     let server = ChanServer::new(
         cli.dir,
-        ParticipantId::new(cli.as_),
+        identity,
+        session_id,
         cli.opencode,
         cli.opencode_password,
     );

@@ -133,6 +133,7 @@ struct PageQuery {
     cursor: Option<u64>,
     limit: Option<usize>,
     participant: Option<String>,
+    include_self: Option<bool>,
 }
 
 async fn inbox(
@@ -152,9 +153,12 @@ async fn room(
     Path(room): Path<String>,
     Query(q): Query<PageQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let who = q
-        .participant
-        .map_or_else(|| ParticipantId::new("_"), ParticipantId::new);
+    let include_self = q.include_self.unwrap_or(false);
+    let who = match (q.participant.as_ref(), include_self) {
+        (Some(p), _) => ParticipantId::new(p),
+        (None, true) => ParticipantId::new("_"),
+        (None, false) => return Err(bad("participant required")),
+    };
     let (msgs, next) = state.backend.recv_room(
         &who,
         &RoomId::new(room),

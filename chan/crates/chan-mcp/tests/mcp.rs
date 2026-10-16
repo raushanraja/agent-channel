@@ -93,6 +93,10 @@ fn initialize_list_and_call_send() {
         "chan_inject",
         "chan_interrupt",
         "chan_active",
+        "chan_status",
+        "chan_wait",
+        "chan_env",
+        "chan_room",
     ] {
         assert!(tools.contains(name), "missing tool {name} in {tools}");
     }
