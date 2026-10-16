@@ -265,6 +265,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "chan-claude"
+version = "0.1.0"
+dependencies = [
+ "chan-core",
+ "chan-live",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "chan-cli"
 version = "0.1.0"
 dependencies = [

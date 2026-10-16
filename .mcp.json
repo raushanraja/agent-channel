@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "chan": {
+      "command": "chan-mcp",
+      "args": ["--as", "orchestrator"],
+      "env": {}
+    }
+  }
+}
