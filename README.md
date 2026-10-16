@@ -1,4 +1,4 @@
-# orchestrator
+# agent-channel
 
 Tools for orchestrating coding agents.
 
