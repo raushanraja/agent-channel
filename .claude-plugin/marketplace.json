@@ -1,0 +1,25 @@
+{
+  "name": "chan-marketplace",
+  "owner": {
+    "name": "chan"
+  },
+  "metadata": {
+    "description": "chan — durable channel for orchestrating agents (MCP over stdio)",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "chan",
+      "description": "Durable channel for orchestrating agents. Requires chan-mcp on PATH.",
+      "version": "0.1.0",
+      "author": {
+        "name": "chan"
+      },
+      "license": "MIT",
+      "keywords": ["chan", "mcp", "orchestration", "agents"],
+      "source": "./",
+      "mcpServers": ".mcp.json",
+      "strict": true
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "name": "chan",
+  "description": "Durable message channel for orchestrating agents over chan-mcp",
+  "version": "0.1.0"
+}
