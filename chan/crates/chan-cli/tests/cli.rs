@@ -196,3 +196,95 @@ fn interrupt_without_a_live_server_fails_loudly() {
         "interrupt should fail when the engine is down"
     );
 }
+
+
+#[test]
+fn room_echo_suppressed_by_default() {
+    let tmp = tempfile::tempdir().unwrap();
+    assert!(run(tmp.path(), &["init"]).status.success());
+    assert!(run(tmp.path(), &["subscribe", "--as", "w1", "--room", "build"])
+        .status
+        .success());
+    // w1 publishing to the room must not echo back to w1 by default.
+    assert!(run(
+        tmp.path(),
+        &[
+            "publish",
+            "--room",
+            "build",
+            "--from",
+            "w1",
+            "--kind",
+            "progress",
+            "--payload",
+            r#""self""#,
+        ],
+    )
+    .status
+    .success());
+
+    let out = run(tmp.path(), &["room", "--as", "w1", "--room", "build"]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 0, "self message must be filtered");
+
+    let out = run(
+        tmp.path(),
+        &[
+            "room",
+            "--as",
+            "w1",
+            "--room",
+            "build",
+            "--include-self",
+            "--cursor",
+            "0",
+        ],
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 1, "include_self must echo");
+}
+
+#[test]
+fn resolve_participant_from_env_for_inbox() {
+    let tmp = tempfile::tempdir().unwrap();
+    assert!(run(tmp.path(), &["init"]).status.success());
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_chan"))
+        .arg("--dir")
+        .arg(tmp.path())
+        .arg("inbox")
+        .env("CHAN_PARTICIPANT", "worker-x")
+        .output()
+        .expect("spawn chan");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["participant"], "worker-x");
+}
+
+#[test]
+fn send_sets_session_id_from_opencode_env() {
+    let tmp = tempfile::tempdir().unwrap();
+    assert!(run(tmp.path(), &["init"]).status.success());
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_chan"))
+        .arg("--dir")
+        .arg(tmp.path())
+        .args([
+            "send",
+            "--from",
+            "orch",
+            "--to",
+            "direct:w1",
+            "--kind",
+            "task",
+            "--payload",
+            r#"{"x":1}"#,
+        ])
+        .env("OPENCODE_SESSION_ID", "ses_123")
+        .output()
+        .expect("spawn chan");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+
+    let body = std::fs::read_to_string(tmp.path().join("participants/w1.jsonl")).unwrap();
+    assert!(body.contains(r#""session_id":"ses_123""#), "body: {body}");
+}
