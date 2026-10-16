@@ -1,0 +1,9 @@
+{
+  "mcp": {
+    "chan": {
+      "type": "local",
+      "command": ["chan-mcp"],
+      "enabled": true
+    }
+  }
+}

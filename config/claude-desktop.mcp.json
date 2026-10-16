@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "chan": {
+      "command": "chan-mcp",
+      "args": []
+    }
+  }
+}

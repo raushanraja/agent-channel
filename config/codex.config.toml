@@ -1,0 +1,3 @@
+[mcp_servers.chan]
+command = "chan-mcp"
+args = []
