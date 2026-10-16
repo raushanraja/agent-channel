@@ -50,6 +50,9 @@ pub trait Channel {
     /// Record acknowledgement of `id` by `who`.
     fn ack(&self, who: &ParticipantId, id: &MessageId) -> Result<()>;
 
+    /// All messages authored by `from` (every destination consulted).
+    fn messages_from(&self, from: &ParticipantId) -> Result<Vec<Message>>;
+
     /// Summary counts.
     fn list(&self) -> Result<ChannelStats>;
 }

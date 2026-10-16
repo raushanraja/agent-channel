@@ -161,6 +161,37 @@ impl FileBackend {
 }
 
 impl Channel for FileBackend {
+    fn messages_from(&self, from: &ParticipantId) -> Result<Vec<Message>> {
+        let mut out = Vec::new();
+        for dir in ["participants", "rooms"] {
+            let Ok(rd) = std::fs::read_dir(self.root.join(dir)) else {
+                continue;
+            };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.extension().and_then(std::ffi::OsStr::to_str) != Some("jsonl") {
+                    continue;
+                }
+                let Ok(content) = std::fs::read_to_string(&p) else {
+                    continue;
+                };
+                for line in content.lines() {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    let Ok(msg) = serde_json::from_str::<Message>(line) else {
+                        continue;
+                    };
+                    if msg.from == *from {
+                        out.push(msg);
+                    }
+                }
+            }
+        }
+        out.sort_by_key(|a| (a.ts, a.id));
+        Ok(out)
+    }
+
     fn send(&self, msg: &Message) -> Result<MessageId> {
         let path = self.dest_path(&msg.to);
         let line = serde_json::to_string(msg)?;

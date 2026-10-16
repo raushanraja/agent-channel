@@ -134,6 +134,19 @@ impl Channel for RemoteBackend {
         Ok(())
     }
 
+    fn messages_from(&self, from: &ParticipantId) -> Result<Vec<Message>> {
+        let resp = self
+            .auth(
+                self.http
+                    .get(self.url(&format!("/v1/messages?from={from}"))),
+            )
+            .send()
+            .map_err(transport)?;
+        let v = Self::decode(resp)?;
+        serde_json::from_value(v.get("messages").cloned().unwrap_or(Value::Null))
+            .map_err(ChanError::Serde)
+    }
+
     fn list(&self) -> Result<ChannelStats> {
         let resp = self
             .auth(self.http.get(self.url("/v1/health")))

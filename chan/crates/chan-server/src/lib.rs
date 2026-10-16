@@ -49,6 +49,7 @@ pub fn router(state: Arc<ServerState>) -> Router {
         .route("/v1/subscribe", post(subscribe))
         .route("/v1/ack", post(ack))
         .route("/v1/rooms", get(rooms))
+        .route("/v1/messages", get(messages_by_from))
         .route("/v1/inbox/{participant}/stream", get(stream))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth));
     Router::new()
@@ -200,6 +201,18 @@ async fn ack(
         .backend
         .ack(&ParticipantId::new(body.participant), &id)?;
     Ok(Json(json!({ "acked": body.id })))
+}
+
+async fn messages_by_from(
+    State(state): State<Arc<ServerState>>,
+    Query(q): Query<PageQuery>,
+) -> Result<Json<Value>, ApiError> {
+    // query: from=<participant>
+    let Some(from) = q.participant.clone() else {
+        return Err(bad("missing `from`"));
+    };
+    let msgs = state.backend.messages_from(&ParticipantId::new(from))?;
+    Ok(Json(json!({ "messages": msgs })))
 }
 
 async fn rooms(State(state): State<Arc<ServerState>>) -> Result<Json<Value>, ApiError> {

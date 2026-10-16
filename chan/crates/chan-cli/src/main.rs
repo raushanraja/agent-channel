@@ -128,6 +128,13 @@ enum Cmd {
     Rooms,
     /// Summary counts.
     List,
+    /// All messages authored by a participant.
+    History {
+        #[arg(long)]
+        from: String,
+        #[arg(long)]
+        kind: Option<String>,
+    },
     /// Bridge a participant's inbox into a live opencode session (durable-first).
     Attach {
         #[arg(long)]
@@ -323,6 +330,13 @@ impl Chan {
             Chan::Remote { backend, .. } => backend.recv_room(who, room, cursor, limit)?,
         })
     }
+
+    fn messages_from(&self, from: &ParticipantId) -> Result<Vec<Message>> {
+        Ok(match self {
+            Chan::Local(b) => b.messages_from(from)?,
+            Chan::Remote { backend, .. } => backend.messages_from(from)?,
+        })
+    }
 }
 
 fn main() -> Result<()> {
@@ -479,6 +493,14 @@ fn main() -> Result<()> {
         }
         Cmd::List => {
             print_json(&serde_json::json!(chan.list()?));
+        }
+        Cmd::History { from, kind } => {
+            let mut msgs = chan.messages_from(&ParticipantId::new(from))?;
+            if let Some(k) = kind {
+                let want = parse_kind(&k)?;
+                msgs.retain(|m| m.kind == want);
+            }
+            print_json(&serde_json::json!(msgs));
         }
         Cmd::Attach {
             participant,

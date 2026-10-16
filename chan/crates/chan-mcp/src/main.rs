@@ -111,6 +111,18 @@ struct AckArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+struct HistoryArgs {
+    /// Author of the messages to list.
+    from: String,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    to: Option<String>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 struct SessionArgs {
     /// Live session id.
     session: String,
@@ -366,6 +378,28 @@ impl ChanServer {
         )
         .map_err(internal)?;
         Ok(serde_json::json!({ "acked": a.id }).to_string())
+    }
+
+    #[tool(description = "List all messages authored by a participant (any destination)")]
+    fn chan_history(&self, Parameters(a): Parameters<HistoryArgs>) -> Result<String, McpError> {
+        let b = self.backend()?;
+        let mut msgs = b
+            .messages_from(&ParticipantId::new(&a.from))
+            .map_err(internal)?;
+        if let Some(k) = a.kind {
+            let want = parse_kind(&k)?;
+            msgs.retain(|m| m.kind == want);
+        }
+        if let Some(to) = a.to {
+            let want_addr = parse_addr(&to)?;
+            msgs.retain(|m| m.to == want_addr);
+        }
+        if let Some(limit) = a.limit {
+            if msgs.len() > limit {
+                msgs = msgs.split_off(msgs.len() - limit);
+            }
+        }
+        serde_json::to_string(&msgs).map_err(internal)
     }
 
     #[tool(description = "Show an inbox's cursor and unread count")]
